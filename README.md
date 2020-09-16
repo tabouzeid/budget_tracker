@@ -4,3 +4,4 @@ This app maintains a record of your spending budget. It is mobile enabled and ca
 
 Site Link: https://shielded-scrubland-75235.herokuapp.com/
 
+![App Screenshot](./assets/img/app_screenshot.png)
