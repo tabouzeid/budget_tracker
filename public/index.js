@@ -1,6 +1,7 @@
 let transactions = [];
 let savedTransactions = [];
 let myChart;
+var db;
 
 fetch("/api/transaction")
   .then(response => {
@@ -67,20 +68,16 @@ function populateChart() {
 
   myChart = new Chart(ctx, {
     type: 'line',
-      data: {
-        labels,
-        datasets: [{
-            label: "Total Over Time",
-            fill: true,
-            backgroundColor: "#6666ff",
-            data
-        }]
+    data: {
+      labels,
+      datasets: [{
+        label: "Total Over Time",
+        fill: true,
+        backgroundColor: "#6666ff",
+        data
+      }]
     }
   });
-}
-
-function saveRecord(record) {
-  savedTransactions.unshift(record);
 }
 
 function sendTransaction(isAdding) {
@@ -117,15 +114,6 @@ function sendTransaction(isAdding) {
   populateTable();
   populateTotal();
 
-  if(savedTransactions.length){
-    savedTransactions.forEach((trans) => {send(trans)});
-    savedTransactions = [];
-  }
-  
-  send(transaction);
-}
-
-function send(transaction) {
   // also send to server
   fetch("/api/transaction", {
     method: "POST",
@@ -135,33 +123,92 @@ function send(transaction) {
       "Content-Type": "application/json"
     }
   })
-  .then(response => {    
-    return response.json();
-  })
-  .then(data => {
-    if (data.errors) {
-      errorEl.textContent = "Missing Information";
-    }
-    else {
+    .then(response => {
+      return response.json();
+    })
+    .then(data => {
+      if (data.errors) {
+        errorEl.textContent = "Missing Information";
+      }
+      else {
+        // clear form
+        nameEl.value = "";
+        amountEl.value = "";
+      }
+    })
+    .catch(err => {
+      // fetch failed, so save in indexed db
+      saveRecord(transaction);
+
       // clear form
       nameEl.value = "";
       amountEl.value = "";
-    }
-  })
-  .catch(err => {
-    // fetch failed, so save in indexed db
-    saveRecord(transaction);
-
-    // clear form
-    nameEl.value = "";
-    amountEl.value = "";
-  });
+    });
 }
 
-document.querySelector("#add-btn").onclick = function() {
+document.querySelector("#add-btn").onclick = function () {
   sendTransaction(true);
 };
 
-document.querySelector("#sub-btn").onclick = function() {
+document.querySelector("#sub-btn").onclick = function () {
   sendTransaction(false);
 };
+
+////////////
+
+function openDb() {
+  const request = indexedDB.open("budget", 1);
+  request.onupgradeneeded = function (event) {
+    const db = event.target.result;
+    db.createObjectStore("pending", { autoIncrement: true });
+  };
+
+  request.onsuccess = function (event) {
+    db = event.target.result;
+    if (navigator.onLine) {
+      checkDatabase();
+    }
+  };
+  request.onerror = function (event) {
+    console.log("Woops! " + event.target.errorCode);
+  };
+}
+
+function getTransaction() {
+  const transaction = db.transaction(["pending"], "readwrite");
+  return transaction.objectStore("pending");
+}
+
+function saveRecord(record) {
+  getTransaction().add(record);
+}
+
+function clearDB() {
+  getTransaction().clear();
+}
+
+function sendCachedTransactions() {
+  let getAll =  getTransaction().getAll();
+
+  getAll.onsuccess = function() {
+    if (getAll.result.length > 0) {
+      fetch("/api/transaction/bulk", {
+        method: "POST",
+        body: JSON.stringify(getAll.result),
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Content-Type": "application/json"
+        }
+      })
+      .then(response => response.json())
+      .then(() => {
+        clearDB()
+      });
+    }
+  };
+}
+
+openDb();
+
+// listen for app coming back online
+window.addEventListener("online", sendCachedTransactions);
